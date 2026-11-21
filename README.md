@@ -41,6 +41,7 @@ python -m unittest discover -s tests -v
 ## 專案文件
 
 - [系統架構圖與元件對照](docs/ARCHITECTURE.md)
+- [錄影展示腳本（評估集）](docs/DEMO_SCRIPT.md)
 - [開發步驟與進度](DEVELOPMENT_PLAN.md)
 - [餐廳資料說明](data/README.md)
 
