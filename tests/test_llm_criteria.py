@@ -95,17 +95,17 @@ class ValidationTests(unittest.TestCase):
 
 class PipelineFallbackTests(unittest.TestCase):
     def test_rules_first_model_only_for_unreadable_messages(self):
-        model = FakeParserModel(output(cuisines=["飯食"], dishes=["豬排飯"]))
+        model = FakeParserModel(output(cuisines=["飯食"], dishes=["雞排飯"]))
         pipeline = RecommendationPipeline(model=AcceptModel(), parser_model=model)
         readable = pipeline.handle("A", "想吃麵，100元以內")
         self.assertEqual(model.calls, [])  # The rules understood it; no model call.
         self.assertEqual(readable.criteria.budget_twd, 100)
-        free = pipeline.handle("A", "豬排飯")
+        free = pipeline.handle("A", "雞排飯")
         self.assertEqual(len(model.calls), 1)
         self.assertEqual(model.calls[0]["previous"]["budget_twd"], 100)
-        self.assertEqual(free.criteria.dishes, ("豬排飯",))
-        # No shop's menu literally lists 豬排飯, so the reply says so instead of implying it.
-        self.assertTrue(free.reply.startswith("目前資料裡沒有找到賣豬排飯的店，先推薦相近的飯食："))
+        self.assertEqual(free.criteria.dishes, ("雞排飯",))
+        # No shop's menu lists 雞排飯, so the reply says so instead of implying it.
+        self.assertTrue(free.reply.startswith("目前資料裡沒有找到賣雞排飯的店，先推薦相近的飯食："))
         # The fixed output format is unchanged.
         self.assertIn("地址：", free.reply)
         self.assertIn("價格：主餐約", free.reply)
@@ -151,10 +151,10 @@ class PipelineFallbackTests(unittest.TestCase):
         result = RecommendationPipeline(model=AcceptModel(), parser_model=model).handle("A", "牛肉麵好了")
         self.assertTrue(result.reply.startswith("想吃牛肉麵的話"))
         self.assertTrue(result.restaurant_ids)
-        pipeline_catalog = RecommendationPipeline(model=AcceptModel()).catalog
+        from food_crag.retriever import sells
+        catalog = RecommendationPipeline(model=AcceptModel()).catalog
         for i in result.restaurant_ids:
-            self.assertTrue(any("牛肉麵" in t for t in (pipeline_catalog[i].name, pipeline_catalog[i].menu_summary,
-                                                          *pipeline_catalog[i].menu_items)), i)
+            self.assertTrue(sells(catalog[i], "牛肉麵"), i)
 
     def test_sellers_blocked_by_budget_are_named_not_recommended(self):
         # Both beef-noodle shops' cheapest mains exceed 35; other noodle shops start at 30.
@@ -162,13 +162,26 @@ class PipelineFallbackTests(unittest.TestCase):
         result = RecommendationPipeline(model=AcceptModel(), parser_model=model).handle("A", "牛肉麵 35 塊左右")
         self.assertRegex(result.reply, r"^有 \d+ 家賣牛肉麵，但不符合你的其他條件（[^）]*預算[^）]*）；先推薦符合條件的相近的麵食：")
 
-    def test_sells_is_literal_containment(self):
+    def test_sells_matches_main_part_and_staple(self):
         from food_crag.retriever import sells
         from food_crag.domain import Restaurant
-        shop = Restaurant("X", "測試", "雲林縣", "斗六市", "地址", (), None, menu_items=("厚切豬排飯", "排骨飯"))
-        self.assertTrue(sells(shop, "豬排飯"))
-        self.assertTrue(sells(shop, "豬排"))
-        self.assertFalse(sells(shop, "炸雞排飯"))
+        def shop(*items, summary=""):
+            return Restaurant("X", "測試", "雲林縣", "斗六市", "地址", (), None, menu_summary=summary, menu_items=items)
+        self.assertTrue(sells(shop("厚切豬排飯"), "豬排"))
+        self.assertTrue(sells(shop("咖哩豬排蛋包飯"), "豬排飯"))
+        self.assertTrue(sells(shop("咖哩豬排蛋包飯（大）"), "豬排飯"))
+        self.assertTrue(sells(shop("牛肉乾拌麵"), "牛肉麵"))
+        self.assertFalse(sells(shop("排骨飯"), "豬排飯"))       # no 豬排
+        self.assertFalse(sells(shop("濃醬咖哩炸飯糰"), "咖哩飯"))  # ends in 糰, not 飯
+        self.assertFalse(sells(shop("飯糰豬排"), "豬排飯"))     # staple before main part
+        self.assertFalse(sells(shop("蝦仁炒麵"), "炒飯"))       # one-character main part stays literal
+        self.assertFalse(sells(shop(summary="豬排、白飯"), "豬排飯"))  # summary checked per item
+
+    def test_dish_with_budget_says_budget_is_per_shop(self):
+        model = FakeParserModel(output(cuisines=["麵食"], dishes=["牛肉麵"], budget_twd=150))
+        result = RecommendationPipeline(model=AcceptModel(), parser_model=model).handle("A", "牛肉麵 150 塊左右")
+        self.assertTrue(result.restaurant_ids)
+        self.assertIn("預算是用店內最便宜的主餐判斷，不一定是牛肉麵的價格", result.reply)
 
     def test_rule_dish_names_reset_when_food_wish_changes(self):
         model = FakeParserModel(output(cuisines=["飯食"], dishes=["豬排飯"]))

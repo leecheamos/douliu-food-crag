@@ -3,6 +3,7 @@
 With an optional SemanticIndex, candidates (still: eligible AND lexical hit) are
 re-ranked by Reciprocal Rank Fusion of the TF-IDF and embedding rankings.
 """
+import re
 from dataclasses import replace
 
 from .adapters.gemini import GeminiError
@@ -34,10 +35,30 @@ def document_text(r):
     ))
 
 
+STAPLES = ("麵線", "便當", "飯", "麵", "丼")
+
+
+def dish_in(dish, text):
+    """True if one menu text is the dish (user decision 2026-11-21).
+
+    A dish ending in a staple with a 2+ character main part also matches when
+    that part comes before the item's final staple: 咖哩豬排蛋包飯 counts as 豬排飯, while
+    排骨飯 does not (no 豬排), 咖哩炸飯糰 is not 咖哩飯 (ends in 糰) and
+    炒飯 stays literal (one-character part).
+    """
+    if dish in text:
+        return True
+    staple = next((s for s in STAPLES if dish.endswith(s)), None)
+    head = dish[:-len(staple)] if staple else ""
+    text = re.sub(r"[（(].*$", "", text)  # 咖哩豬排蛋包飯（大） still ends in its staple.
+    start = text.find(head) if len(head) >= 2 else -1
+    return start >= 0 and text.endswith(staple) and start + len(head) <= len(text) - len(staple)
+
+
 def sells(restaurant, dish):
-    """Literal containment only (user decision 2026-11-21): 厚切豬排飯 sells 豬排飯; 排骨飯 does not."""
-    texts = (restaurant.name, restaurant.menu_summary, *restaurant.menu_items)
-    return any(dish in text for text in texts)
+    """Checked per item, so 炒麵、滷肉飯 in one summary never adds up to 炒飯."""
+    texts = (restaurant.name, *restaurant.menu_summary.split("、"), *restaurant.menu_items)
+    return any(dish_in(dish, text) for text in texts)
 
 
 class RestaurantRetriever:

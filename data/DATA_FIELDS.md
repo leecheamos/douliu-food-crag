@@ -27,7 +27,7 @@
 | county / district / address | 雲林縣／斗六市／來源記載地址；有差異記錄在 notes |
 | cuisines | 人工分類陣列，依來源菜色或店名整理，不表示完整菜單或飲食保證 |
 | menu_summary | 招牌品項（3 樣左右，依菜單照片），回覆「主要賣…」使用 |
-| menu_items | 菜單照片上的全部主餐名稱（不含小菜、湯、飲料）；空陣列表示未知。用於檢索文字與菜名字面比對（`retriever.sells`），非空時來源 supports 須含 menu_items |
+| menu_items | 菜單照片上的全部主餐名稱（不含小菜、湯、飲料）；空陣列表示未知。用於檢索文字與菜名比對（`retriever.sells`：字面包含，或主料＋同一主食結尾），非空時來源 supports 須含 menu_items |
 | price_min_twd / price_max_twd | 每人餐費數值或 null；本稿全為 null，不拿單品或禮盒價冒充餐費 |
 | price_evidence | 價格依據或 null |
 | opening_hours | 來源列示時段文字或 null，不等於即時營業狀態 |

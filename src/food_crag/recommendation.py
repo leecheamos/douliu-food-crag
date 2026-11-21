@@ -7,7 +7,7 @@ goes through the same `verify_recommendation` check before reaching the user.
 from collections import Counter
 from dataclasses import dataclass
 
-from .retriever import sells
+from .retriever import dish_in, sells
 
 
 MAX_RECOMMENDATIONS = 3
@@ -46,7 +46,7 @@ def _wish(criteria):
 
 
 def _intro(restaurant, supported, dishes=()):
-    hits = [i for i in (restaurant.name, *restaurant.menu_items) if any(d in i for d in dishes)]
+    hits = [i for i in (restaurant.name, *restaurant.menu_items) if any(dish_in(d, i) for d in dishes)]
     if hits:  # Show the menu items that match the requested dish, e.g. 有賣滷排骨飯.
         return f"{restaurant.name}，有賣{_spoken_list(hits[:2])}" if hits[0] != restaurant.name else restaurant.name
     dishes = [d.strip() for d in restaurant.menu_summary.split("、")] if "menu_summary" in supported else []
@@ -115,6 +115,8 @@ class TemplateReplyGenerator:
             if criteria.meal:  # Service periods are unsourced; meal is only a preference.
                 meal = {"lunch": "午餐", "dinner": "晚餐"}[criteria.meal]
                 note = f"※ 價格是菜單上的單品價，不是整餐費用；是否有供應{meal}尚未確認，出發前請先查營業時間。"
+            if criteria.dishes and criteria.budget_twd is not None:  # Prices are per shop, not per dish.
+                note += f"\n※ 預算是用店內最便宜的主餐判斷，不一定是{'、'.join(criteria.dishes)}的價格。"
             return Recommendation("\n\n".join([intro, *blocks, note]), tuple(picks))
         if evaluation.evidence_state == "insufficient":
             detail = _unknown_summary(retrieval)
