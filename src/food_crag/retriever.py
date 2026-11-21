@@ -22,15 +22,22 @@ def cuisine_labels(cuisines):
 def ranking_query(criteria: SearchCriteria):
     # Reconstruct from accumulated positive conditions, never from a negative
     # instruction or a later "change budget" message. Region-only is browsing.
-    return " ".join((*criteria.cuisines, *((criteria.landmark,) if criteria.landmark else ()))) or criteria.district
+    return " ".join((*criteria.cuisines, *criteria.dishes,
+                     *((criteria.landmark,) if criteria.landmark else ()))) or criteria.district
 
 
 def document_text(r):
     """The single text representation shared by TF-IDF and embeddings."""
     return " ".join((
         r.name, r.county, r.district, *sorted(cuisine_labels(r.cuisines)),
-        r.menu_summary, *r.landmarks,
+        r.menu_summary, *r.menu_items, *r.landmarks,
     ))
+
+
+def sells(restaurant, dish):
+    """Literal containment only (user decision 2026-11-21): 厚切豬排飯 sells 豬排飯; 排骨飯 does not."""
+    texts = (restaurant.name, restaurant.menu_summary, *restaurant.menu_items)
+    return any(dish in text for text in texts)
 
 
 class RestaurantRetriever:
@@ -54,7 +61,8 @@ class RestaurantRetriever:
         if (restaurant.county, restaurant.district) != (criteria.county, criteria.district):
             excluded.append("地區不符")
         labels = cuisine_labels(restaurant.cuisines)
-        if criteria.cuisines:
+        # A shop that literally sells a requested dish satisfies the cuisine condition.
+        if criteria.cuisines and not any(sells(restaurant, d) for d in criteria.dishes):
             requested = {ALIASES.get(c, c) for c in criteria.cuisines}
             if not requested & labels:
                 if not labels or any(PARENTS.get(c) in labels for c in requested):
@@ -76,11 +84,11 @@ class RestaurantRetriever:
                 unknown.append("缺少有來源的主餐標價資料")
             elif low > criteria.budget_twd:
                 excluded.append("最便宜的主餐標價超出預算")
-        if criteria.meal:
-            if restaurant.meal_periods is None or "meal_periods" not in supported:
-                unknown.append("用餐時段供應資料未知")
-            elif criteria.meal not in restaurant.meal_periods:
-                excluded.append("用餐時段不符")
+        # Meal is a preference (user decision 2026-11-20): almost no shop has
+        # sourced service periods, so unknown periods pass and the reply asks the
+        # user to check opening hours. Only a sourced mismatch excludes a shop.
+        if criteria.meal and restaurant.meal_periods is not None and "meal_periods" in supported                 and criteria.meal not in restaurant.meal_periods:
+            excluded.append("用餐時段不符")
         if criteria.landmark:
             if not restaurant.landmarks or "landmarks" not in supported:
                 unknown.append("地標資料未知")

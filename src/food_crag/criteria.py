@@ -21,11 +21,12 @@ CUISINES = {
     "羊肉料理": ("羊肉料理", "羊肉"), "海鮮": ("海鮮",),
     "刈包": ("刈包",), "簡餐": ("簡餐",),
     "肉圓": ("肉圓",), "和風洋食": ("和風洋食",),
+    "米糕": ("米糕", "筒仔米糕"),
 }
 ALIASES = {alias: canonical for canonical, aliases in CUISINES.items() for alias in aliases}
 PARENTS = {
     "牛肉麵": "麵食", "鍋燒意麵": "麵食", "拉麵": "麵食", "義大利麵": "麵食", "羹麵": "麵食",
-    "肉燥飯": "飯食", "豬腳飯": "飯食", "菜飯": "飯食", "蛋飯": "飯食",
+    "肉燥飯": "飯食", "豬腳飯": "飯食", "菜飯": "飯食", "蛋飯": "飯食", "米糕": "飯食",
 }
 LANDMARKS = {
     "雲林科技大學": ("雲林科技大學", "雲科大"),
@@ -56,6 +57,12 @@ class ParseResult:
     criteria: SearchCriteria
     questions: tuple[str, ...] = ()
     reset: bool = False
+    # True when the rules could not read the message at all (unknown words or
+    # nothing recognised); a model-based parser may then try. Deliberate
+    # questions such as conflicts or two budgets keep this False.
+    unparsed: bool = False
+    # True when the user should be guided (off-topic or undecided); questions[0] is the guide sentence.
+    guide: bool = False
 
 
 class RuleCriteriaParser:
@@ -87,7 +94,9 @@ class RuleCriteriaParser:
             return apply
 
         consume(r"取消預算(?:限制)?|預算不限|不限預算", clear("budget_twd", None))
-        consume(r"取消料理(?:偏好|限制)?|料理不限|不限料理", clear("cuisines", ()))
+        consume(r"取消料理(?:偏好|限制)?|料理不限|不限料理|都可以|隨便", clear("cuisines", ()))
+        if not current.cuisines:
+            current = replace(current, dishes=())
         consume(r"取消排除(?:條件|偏好|限制)(?=\s*(?:$|[，,。；;]))|取消排除(?=\s*(?:$|[，,。；;]))", clear("excluded_cuisines", ()))
         consume(r"取消(?:地標|地點)(?:限制)?|不限地點", clear("landmark", None))
         consume(r"取消(?:時段|用餐時段)(?:限制)?|時段不限", clear("meal", None))
@@ -153,6 +162,8 @@ class RuleCriteriaParser:
         cuisines = list(current.cuisines)
         if positive:
             cuisines = list(dict.fromkeys((cuisines if additive else []) + positive))
+            if not additive:  # A new food wish replaces earlier dish names too.
+                current = replace(current, dishes=())
         current = replace(current, cuisines=tuple(cuisines), excluded_cuisines=tuple(exclusions))
         conflicts = [x for x in cuisines if x in exclusions or PARENTS.get(x) in exclusions]
         if conflicts:
@@ -168,10 +179,11 @@ class RuleCriteriaParser:
             r"(?:請問|幫我|請|我|要|找|推薦|餐廳|吃什麼|有什麼|在|的|附近|這次|今天|可以嗎|謝謝|和|及|或|跟|還有|也|都|以|為主)|[\s,，。.!！?？、:：;；]",
             "", text,
         )
+        unparsed = bool(remainder) or not changed
         if remainder:
             questions.append(f"尚無法理解「{remainder}」。目前支援預算、料理／排除偏好、午晚餐、斗六及指定地標，請換個說法。")
         elif not changed:
             questions.append("請告訴我料理或條件，例如「200 元以內，不要火鍋」。")
         if questions:
-            return ParseResult(original, tuple(questions))
+            return ParseResult(original, tuple(questions), unparsed=unparsed)
         return ParseResult(current)

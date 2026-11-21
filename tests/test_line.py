@@ -30,7 +30,7 @@ class FakeClient:
         self.replies, self.loading = [], []
         self.fail_reply, self.fail_loading = fail_reply, fail_loading
 
-    def reply(self, token, texts):
+    def reply(self, token, texts, quick_replies=()):
         if self.fail_reply:
             raise LineError("http_400")
         self.replies.append((token, texts))
@@ -133,6 +133,17 @@ class WebhookHandlerTests(unittest.TestCase):
         handler = LineWebhookHandler(FakePipeline(), SECRET, client, InlineExecutor())
         self.assertEqual(handler.accept(payload, sign(SECRET, payload)), 200)
 
+    def test_latency_is_logged_without_content(self):
+        import time
+        from food_crag.adapters import line as line_module
+        logs = []
+        with patch.object(line_module, "_log", logs.append):
+            payload = body(text_event(timestamp=int(time.time() * 1000) - 2500))
+            self.send(payload)
+        self.assertEqual(len(logs), 1)
+        self.assertRegex(logs[0], r"^replied:criteria_updated decision=none shops=0 latency=2\.\ds$")
+        self.assertEqual(line_module._latency({}), "latency=unknown")
+
     def test_deduplicator_is_bounded(self):
         dedup = EventDeduplicator(capacity=2)
         self.assertTrue(all(dedup.first_time(i) for i in ("a", "b", "c")))
@@ -164,6 +175,18 @@ class MessagingClientTests(unittest.TestCase):
             self.assertEqual(str(raised.exception), code)
         with self.assertRaises(LineError):
             LineMessagingClient("").reply("R1", ["a"])
+
+    def test_quick_reply_buttons_hang_off_the_last_message(self):
+        client = LineMessagingClient("secret-token")
+        with patch.object(client, "_post") as post:
+            client.reply("R1", ["a", "b"], ("想吃麵食", "x" * 30, *[str(i) for i in range(20)]))
+        messages = post.call_args.args[1]["messages"]
+        self.assertNotIn("quickReply", messages[0])
+        items = messages[1]["quickReply"]["items"]
+        self.assertEqual(len(items), 13)
+        self.assertEqual(items[0], {"type": "action", "action": {"type": "message", "label": "想吃麵食", "text": "想吃麵食"}})
+        self.assertEqual(len(items[1]["action"]["label"]), 20)
+        self.assertEqual(items[1]["action"]["text"], "x" * 30)
 
 
 class LineHTTPTests(unittest.TestCase):

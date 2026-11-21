@@ -239,7 +239,7 @@ class EvaluationHTTPTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            for message, expected, ids in [("想吃麵", "accept", ["DL-017"]), ("50元以內", "accept", ["DL-017"])]:
+            for message, expected, ids in [("想吃麵", "accept", ["DL-033"]), ("50元以內", "accept", ["DL-033"])]:
                 request = Request(f"http://127.0.0.1:{server.server_port}/api/chat", data=json.dumps({"user_id": "A", "message": message}).encode(), headers={"Content-Type": "application/json"})
                 with urlopen(request, timeout=5) as response:
                     data = json.load(response)

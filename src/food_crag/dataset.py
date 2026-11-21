@@ -17,7 +17,7 @@ SOURCE_TYPES = {
 REQUIRED = {
     "id", "name", "county", "district", "address", "source_urls", "checked_at",
     "cuisines", "price_min_twd", "price_max_twd", "price_evidence",
-    "menu_summary", "opening_hours", "landmarks", "sources", "notes",
+    "menu_summary", "menu_items", "opening_hours", "landmarks", "sources", "notes",
     "map_search_url", "meal_periods", "operating_status", "review_status",
 }
 
@@ -89,6 +89,9 @@ def validate_records(records):
         _url(record["map_search_url"], f"{label}.map_search_url")
         _date(record["checked_at"], f"{label}.checked_at", nullable=True)
         _require(isinstance(record["menu_summary"], str), f"{label}: invalid menu summary")
+        items = record["menu_items"]
+        _require(isinstance(items, list) and all(_text(i) for i in items) and len(items) == len(set(items)),
+                 f"{label}: menu_items must be unique non-empty strings")
         for field in ("opening_hours", "price_evidence"):
             _require(record[field] is None or _text(record[field]), f"{label}.{field}: expected text or null")
         for field in ("price_min_twd", "price_max_twd"):
@@ -140,7 +143,7 @@ def validate_records(records):
             _require("price_evidence" in supported, f"{label}: price missing source support")
         if record["landmarks"]:
             _require("landmarks" in supported, f"{label}: landmarks missing source support")
-        for field in ("opening_hours", "menu_summary", "meal_periods"):
+        for field in ("opening_hours", "menu_summary", "menu_items", "meal_periods"):
             if record[field]:
                 _require(field in supported, f"{label}: {field} missing source support")
     return records
@@ -159,7 +162,7 @@ def load_restaurants(path=DEFAULT_DATA_PATH):
     result = []
     for record in read_records(path):
         fields = {key: record[key] for key in Restaurant.__dataclass_fields__}
-        for key in ("source_urls", "cuisines", "landmarks", "sources", "notes"):
+        for key in ("source_urls", "cuisines", "menu_items", "landmarks", "sources", "notes"):
             fields[key] = tuple(fields[key])
         if fields["meal_periods"] is not None:
             fields["meal_periods"] = tuple(fields["meal_periods"])

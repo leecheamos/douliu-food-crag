@@ -5,7 +5,7 @@ from math import isclose, isfinite
 from .adapters.gemini import GeminiError
 from .criteria import ALIASES, PARENTS
 from .domain import Evaluation, EvaluationAttempt
-from .retriever import RestaurantRetriever
+from .retriever import RestaurantRetriever, sells
 from .tfidf import calculate_query_coverage, cosine_similarity, explain_match, vectorize_query
 
 SCHEMA = {
@@ -91,12 +91,27 @@ class GeminiEvaluator:
         rewrites = allowed_rewrites(report.query, criteria)
         limits = ("Source review is not current operation verification; categories are not a complete menu. "
                   "price_min_twd/price_max_twd are listed main-dish single-item prices from menu photos, not "
-                  "per-person meal cost; a budget is met when price_min_twd is within it.")
+                  "per-person meal cost; a budget is met when price_min_twd is within it. "
+                  "dish_preferences (and dish words in query) are soft ranking preferences, NOT conditions: "
+                  "menu_summary lists a few signature items and menu_items lists main dishes transcribed from a "
+                  "menu photo (empty when unknown); never reject, retry or stop because a dish is not listed "
+                  "(the reply code handles dish matching); judge only the criteria. Candidates in sells_requested_dish "
+                  "satisfy the cuisine criteria even if their categories differ: accept them when the other "
+                  "criteria hold. Accept eligible candidates, "
+                  "ideally those whose menu items are closest to the dish. meal_preference (lunch/dinner) is "
+                  "unverifiable here and is handled by the reply's reminder to check opening hours; never "
+                  "reject, retry or stop because service periods are unknown.")
         if hybrid:
             limits += (" semantic_score is embedding similarity used only to re-rank candidates that already "
                        "passed hard filters; it is not evidence that any condition is met.")
         payload = {
-            "criteria": asdict(criteria), "query": report.query, "allowed_rewrites": list(rewrites),
+            # Dish names are ranking preferences, not conditions to verify.
+            "criteria": asdict(replace(criteria, dishes=(), meal=None)), "dish_preferences": list(criteria.dishes),
+            "meal_preference": criteria.meal,
+            # Locally checked: these candidates literally list a requested dish, which satisfies the cuisine.
+            "sells_requested_dish": [c.restaurant.id for c in report.candidates
+                                     if any(sells(c.restaurant, d) for d in criteria.dishes)],
+            "query": report.query, "allowed_rewrites": list(rewrites),
             "ranking": report.ranking,
             "candidates": [asdict(candidate) for candidate in report.candidates],
             "limits": limits,

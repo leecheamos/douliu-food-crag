@@ -18,7 +18,7 @@ class DatasetTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.records), 30)
         self.assertLessEqual(len(self.records), 50)
         # DL-011 was merged into DL-010 on 2026-11-19; IDs are never reused.
-        self.assertEqual({r["id"] for r in self.records}, {f"DL-{i:03}" for i in range(1, 33)} - {"DL-011"})
+        self.assertEqual({r["id"] for r in self.records}, {f"DL-{i:03}" for i in range(1, 34)} - {"DL-011"})
 
     def test_draft_is_preserved_and_formal_is_separate(self):
         draft = json.loads(DEFAULT_DATA_PATH.with_name("restaurants.draft.json").read_text(encoding="utf-8"))
@@ -41,7 +41,7 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(item.notes, tuple(raw["notes"]))
 
     def test_original_manual_received_date_is_not_rewritten(self):
-        for record in self.records[-2:]:
+        for record in (r for r in self.records if r["id"] in {"DL-031", "DL-032"}):
             source = next(s for s in record["sources"] if s["access_method"] == "manual_entry")
             self.assertEqual(source["reported_at"], "2026-09-07")
             self.assertIsNone(source["checked_at"])

@@ -65,7 +65,7 @@ class RetrievalTests(unittest.TestCase):
     def test_unknown_hard_fields_never_pass(self):
         changes = [dict(price_min_twd=None, price_max_twd=None),
                    dict(price_min_twd=None), dict(price_evidence=None), dict(sources=()),
-                   dict(meal_periods=None), dict(landmarks=()), dict(cuisines=())]
+                   dict(landmarks=()), dict(cuisines=())]
         criteria = SearchCriteria(cuisines=("麵食",), budget_twd=200, meal="lunch", landmark="鎮南國小站")
         for change in changes:
             with self.subTest(change=change):
@@ -74,6 +74,13 @@ class RetrievalTests(unittest.TestCase):
                 self.assertEqual(result.candidates, ())
                 self.assertEqual(result.decisions[0].outcome, "unknown")
                 self.assertTrue(result.decisions[0].reasons)
+
+    def test_meal_is_a_preference_but_sourced_mismatch_excludes(self):
+        criteria = SearchCriteria(cuisines=("麵食",), meal="dinner")
+        unknown = RestaurantRetriever([fixture(meal_periods=None)]).search("麵食", criteria)
+        self.assertEqual(len(unknown.candidates), 1)
+        mismatch = RestaurantRetriever([fixture(meal_periods=("lunch",))]).search("麵食", criteria)
+        self.assertEqual(mismatch.decisions[0].outcome, "excluded")
 
     def test_budget_matches_when_cheapest_main_dish_fits(self):
         # Prices are listed main-dish single-item prices, not per-person meal cost.
@@ -153,9 +160,10 @@ class RetrievalTests(unittest.TestCase):
         self.assertTrue(all(c.restaurant.price_min_twd <= 50 for c in budget.candidates))
         self.assertLess(len(budget.candidates), len(noodles.candidates))
         self.assertFalse(retriever.search("麵食", SearchCriteria(cuisines=("麵食",), budget_twd=20)).candidates)
+        # Meal is a preference: unknown service periods do not block (reply reminds to check hours).
         time = retriever.search("斗六", SearchCriteria(meal="lunch"))
-        self.assertEqual(time.status, "insufficient_data")
-        self.assertTrue(all(d.outcome == "unknown" for d in time.decisions))
+        self.assertEqual(time.status, "candidates_found")
+        self.assertFalse(any(d.outcome == "unknown" for d in time.decisions))
         place = retriever.search("鎮南國小站", SearchCriteria(landmark="鎮南國小站"))
         self.assertEqual([c.restaurant.id for c in place.candidates], ["DL-025"])
 

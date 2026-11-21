@@ -37,7 +37,8 @@ class TemplateReplyTests(unittest.TestCase):
     def test_accept_lists_grounded_fields_in_ranking_order(self):
         evaluation = self.accept(["DL-027", "DL-017"])
         result = self.generator.generate(self.criteria, self.report, evaluation)
-        self.assertEqual(result.restaurant_ids, ("DL-017", "DL-027"))
+        # menu_items joined the ranking text (2026-11-21); DL-027 lists more noodle dishes.
+        self.assertEqual(result.restaurant_ids, ("DL-027", "DL-017"))
         for restaurant_id in result.restaurant_ids:
             r = self.catalog[restaurant_id]
             for fact in (r.name, f"地址：{r.address}", r.map_search_url):
@@ -49,6 +50,14 @@ class TemplateReplyTests(unittest.TestCase):
         self.assertIn("不是整餐費用", result.reply)
         self.assertNotIn("資料來源", result.reply)
         self.assertTrue(verify_recommendation(result, self.catalog, evaluation, self.report))
+
+    def test_meal_preference_adds_opening_hours_reminder(self):
+        dinner = replace(self.criteria, meal="dinner")
+        report = self.retriever.search("麵食", dinner)
+        result = self.generator.generate(dinner, report, self.accept(["DL-017"]))
+        self.assertTrue(result.reply.startswith("想吃麵食、不要火鍋、吃晚餐的話"))
+        self.assertIn("是否有供應晚餐尚未確認", result.reply)
+        self.assertNotIn("供應晚餐", self.generator.generate(self.criteria, self.report, self.accept(["DL-017"])).reply)
 
     def test_at_most_three_and_never_padded(self):
         all_ids = [c.restaurant.id for c in self.report.candidates]

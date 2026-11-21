@@ -11,6 +11,7 @@ import hmac
 import http.client
 import json
 import sys
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -83,9 +84,13 @@ class LineMessagingClient:
         except (TimeoutError, URLError, OSError, http.client.HTTPException):
             raise LineError("network_or_timeout") from None
 
-    def reply(self, reply_token: str, texts: list[str]) -> None:
-        self._post("/message/reply", {"replyToken": reply_token,
-                                      "messages": [{"type": "text", "text": t} for t in texts[:MAX_MESSAGES]]})
+    def reply(self, reply_token: str, texts: list[str], quick_replies=()) -> None:
+        messages = [{"type": "text", "text": t} for t in texts[:MAX_MESSAGES]]
+        if quick_replies:  # LINE: buttons hang off the last message; max 13, label max 20 chars.
+            messages[-1]["quickReply"] = {"items": [
+                {"type": "action", "action": {"type": "message", "label": t[:20], "text": t}}
+                for t in quick_replies[:13]]}
+        self._post("/message/reply", {"replyToken": reply_token, "messages": messages})
 
     def show_loading(self, user_id: str, seconds: int = 60) -> None:
         """Typing animation in one-to-one chats; disappears when the reply arrives."""
@@ -113,6 +118,14 @@ class EventDeduplicator:
 def _log(code: str) -> None:
     # Codes only: no message text, user IDs, reply tokens or credentials.
     print(f"[line] {code}", file=sys.stderr, flush=True)
+
+
+def _latency(event: dict) -> str:
+    """Seconds from the user's send time (LINE event timestamp, ms) to our reply."""
+    sent = event.get("timestamp")
+    if not isinstance(sent, (int, float)) or isinstance(sent, bool):
+        return "latency=unknown"
+    return f"latency={max(0.0, time.time() - sent / 1000):.1f}s"
 
 
 class LineWebhookHandler:
@@ -167,8 +180,9 @@ class LineWebhookHandler:
                 except LineError as error:
                     _log(f"loading_failed:{error}")
             result = self.pipeline.handle(USER_PREFIX + user_id, message["text"])
-            self.client.reply(reply_token, split_text(result.reply))
-            _log(f"replied:{result.status}")
+            self.client.reply(reply_token, split_text(result.reply), result.quick_replies)
+            decision = result.evaluation.decision if result.evaluation is not None else "none"
+            _log(f"replied:{result.status} decision={decision} shops={len(result.restaurant_ids)} {_latency(event)}")
         except LineError as error:
             _log(f"reply_failed:{error}")
         except Exception as error:  # A worker must never die silently.

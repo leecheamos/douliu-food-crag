@@ -12,6 +12,8 @@ class SearchCriteria:
     cuisines: tuple[str, ...] = ()
     excluded_cuisines: tuple[str, ...] = ()
     landmark: str | None = None
+    # Dish names (e.g. 豬排飯) only re-rank candidates; they never filter.
+    dishes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class Restaurant:
     price_max_twd: int | None = None
     price_evidence: str | None = None
     menu_summary: str = ""
+    menu_items: tuple[str, ...] = ()  # Every main dish name on the menu photo.
     opening_hours: str | None = None
     landmarks: tuple[str, ...] = ()
     sources: tuple[dict, ...] = ()
@@ -100,3 +103,4 @@ class ChatResult:
     retrieval: RetrievalResult | None = None
     evaluation: Evaluation | None = None
     attempts: tuple[EvaluationAttempt, ...] = ()
+    quick_replies: tuple[str, ...] = ()  # LINE quick-reply buttons; each sends its own text.
