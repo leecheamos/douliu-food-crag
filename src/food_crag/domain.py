@@ -32,6 +32,7 @@ class Restaurant:
     menu_summary: str = ""
     menu_items: tuple[str, ...] = ()  # Every main dish name on the menu photo.
     menu_prices: tuple[tuple[str, int], ...] = ()  # (item, cheapest size price) in menu order; may be partial.
+    item_tags: tuple[tuple[str, tuple[str, ...]], ...] = ()  # Hand-set item categories; override keyword rules.
     opening_hours: str | None = None
     landmarks: tuple[str, ...] = ()
     sources: tuple[dict, ...] = ()

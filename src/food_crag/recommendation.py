@@ -6,8 +6,9 @@ goes through the same `verify_recommendation` check before reaching the user.
 """
 from dataclasses import dataclass
 
-from .criteria import PARENTS
-from .retriever import BUDGET_UNKNOWN, OVER_BUDGET, ROUGH_PRICE, dish_in, fitting_items, sells
+from .criteria import ALIASES, PARENTS
+from .retriever import (BUDGET_UNKNOWN, OVER_BUDGET, ROUGH_PRICE, cuisine_labels, fitting_items, has_dish,
+                        item_labels, sells)
 
 
 MAX_RECOMMENDATIONS = 3
@@ -59,7 +60,11 @@ def _intro(restaurant, supported, criteria):
         if within:
             return f"{restaurant.name}，{criteria.budget_twd} 元以內有：{'、'.join(within[:3])}", True
     dishes = criteria.dishes
-    hits = [i for i in (restaurant.name, *restaurant.menu_items) if any(dish_in(d, i) for d in dishes)]
+    hits = [i for i in (restaurant.name, *restaurant.menu_items) if any(has_dish(restaurant, d, i) for d in dishes)]
+    requested = {ALIASES.get(c, c) for c in criteria.cuisines}
+    if not hits and requested and not requested & cuisine_labels(restaurant.cuisines):
+        # Found through its menu (e.g. 唐揚雞 at a Japanese shop for 炸物): show those items.
+        hits = [i for i in restaurant.menu_items if requested & item_labels(restaurant, i)]
     if hits:  # Show the menu items that match the requested dish, e.g. 有賣：滷排骨飯.
         return (f"{restaurant.name}，有賣：{_spoken_list(hits[:2])}" if hits[0] != restaurant.name else restaurant.name), False
     summary = [d.strip() for d in restaurant.menu_summary.split("、")] if "menu_summary" in supported else []

@@ -8,7 +8,7 @@ from .conversation import InMemoryConversationStore
 from .criteria import CUISINES, PARENTS, RuleCriteriaParser
 from .domain import ChatResult
 from .dataset import load_restaurants
-from .retriever import RestaurantRetriever, ranking_query
+from .retriever import RestaurantRetriever, cuisine_labels, ranking_query
 from .config import Settings
 from .adapters.gemini import GeminiLanguageModel
 from .embedding import load_from_settings
@@ -49,13 +49,14 @@ class RecommendationPipeline:
         self.free_parser = GeminiCriteriaParser(parser_model) if parser_model is not None else None
         # Guide buttons: the most common cuisines in the data, each a phrase the rule parser reads.
         counts = Counter(c for r in self.retriever.restaurants for c in r.cuisines if c in CUISINES)
+        counts["羹類"] = sum("羹類" in cuisine_labels(r.cuisines) for r in self.retriever.restaurants)
         # 飯食/麵食 first because the guide sentence asks "rice, noodles or something else?".
         top = [c for c in ("飯食", "麵食") if counts[c]] + [c for c, _ in counts.most_common() if c not in ("飯食", "麵食")]
         self.guide_buttons = (*(f"想吃{c}" for c in top[:3]), MORE_BUTTON)
         # Other types: 3+ shops so a tap always finds something; noodle kinds and 羹 are
         # left out because the guide already offered rice and noodles.
         self.other_buttons = tuple(f"想吃{c}" for c, n in counts.most_common() if n >= 3 and c not in top[:3]
-                                   and PARENTS.get(c) != "麵食" and "羹" not in c)[:13]
+                                   and PARENTS.get(c) != "麵食" and ("羹" not in c or c == "羹類"))[:13]
         self.shown = {}  # user_id -> restaurant IDs already listed under the stored criteria.
 
     def handle(self, user_id: str, message: str) -> ChatResult:

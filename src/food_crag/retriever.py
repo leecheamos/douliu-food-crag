@@ -7,7 +7,7 @@ import re
 from dataclasses import replace
 
 from .adapters.gemini import GeminiError
-from .criteria import ALIASES, PARENTS
+from .criteria import ALIASES, CUISINES, PARENTS
 from .domain import Candidate, FilterDecision, RetrievalResult, SearchCriteria
 from .tfidf import (
     calculate_idf, calculate_query_coverage, calculate_tfidf, cosine_similarity,
@@ -17,7 +17,8 @@ from .tfidf import (
 
 def cuisine_labels(cuisines):
     labels = {ALIASES.get(name, name) for name in cuisines}
-    return labels | {PARENTS[name] for name in labels if name in PARENTS}
+    # 羹麵 is both 麵食 and 羹類, and PARENTS holds one parent, so 羹類 is added by name.
+    return labels | {PARENTS[name] for name in labels if name in PARENTS} | ({"羹類"} if any("羹" in n for n in labels) else set())
 
 
 def ranking_query(criteria: SearchCriteria):
@@ -30,7 +31,8 @@ def ranking_query(criteria: SearchCriteria):
 def document_text(r):
     """The single text representation shared by TF-IDF and embeddings."""
     return " ".join((
-        r.name, r.county, r.district, *sorted(cuisine_labels(r.cuisines)),
+        # 羹類 left out: the cached embeddings were built from this exact text (TF-IDF adds it).
+        r.name, r.county, r.district, *sorted(cuisine_labels(r.cuisines) - {"羹類"}),
         r.menu_summary, *r.menu_items, *r.landmarks,
     ))
 
@@ -55,10 +57,15 @@ def dish_in(dish, text):
     return start >= 0 and text.endswith(staple) and start + len(head) <= len(text) - len(staple)
 
 
+def has_dish(restaurant, dish, text):
+    """dish_in, except a hand-labelled item must contain the dish literally (牛肉湯麵 has no beef)."""
+    return dish in text if text in dict(restaurant.item_tags) else dish_in(dish, text)
+
+
 def sells(restaurant, dish):
     """Checked per item, so 炒麵、滷肉飯 in one summary never adds up to 炒飯."""
     texts = (restaurant.name, *restaurant.menu_summary.split("、"), *restaurant.menu_items)
-    return any(dish_in(dish, text) for text in texts)
+    return any(has_dish(restaurant, dish, text) for text in texts)
 
 
 NO_PRICE = "缺少有來源的主餐標價資料"
@@ -66,28 +73,46 @@ ROUGH_PRICE = "只有 Google 粗略價位，無法確認是否在預算內"
 BUDGET_UNKNOWN = {NO_PRICE, ROUGH_PRICE}
 OVER_BUDGET = {"最便宜的主餐標價超出預算", "符合的品項標價都超出預算"}
 
-# Words that make a menu item count as the broad 麵食/飯食 types (user decision 2026-11-23).
-ITEM_WORDS = {"麵食": ("麵", "米粉", "冬粉", "粄條", "粿仔"), "飯食": ("飯", "粥", "米糕", "丼")}
+# Item keywords (user decisions 2026-11-23); one item may get several labels.
+ITEM_WORDS = {
+    "麵食": ("麵", "米粉", "冬粉", "粄條", "粿仔", "鍋燒"), "飯食": ("飯", "粥", "米糕", "丼"),
+    "火鍋": ("鍋",), "炸物": ("炸", "唐揚", "雞排"), "羹類": ("羹",), "咖哩": ("咖哩",),
+    "甜點": ("麵包", "豆花", "蛋糕", "鬆餅", "布丁"),
+}
+BROAD = {"麵食", "飯食"}  # Shop-level kinds: a shop joins them by its own tag, not by one item.
+NOT_ITEM_WORDS = {"麵食": ("麵包", "泡飯"), "火鍋": ("鍋貼", "鍋燒")}  # 鍋燒泡飯 is rice; 鍋燒 is noodles.
+
+
+def item_labels(restaurant, item):
+    """Cuisines one menu item belongs to: its hand labels, else keywords plus cuisines named like a dish."""
+    tags = dict(restaurant.item_tags)
+    if item in tags:
+        return cuisine_labels(tags[item])
+    labels = {c for c, words in ITEM_WORDS.items()
+              if any(w in item for w in words) and not any(w in item for w in NOT_ITEM_WORDS.get(c, ()))}
+    labels |= {c for c in CUISINES if c not in ITEM_WORDS and dish_in(c, item)}  # 炒飯, 義大利麵, 牛排...
+    return cuisine_labels(labels)
 
 
 def fitting_items(restaurant, criteria):
-    """(item, price) pairs of the requested kind, in menu order; None when the kind cannot be told from names.
+    """(item, price) pairs of the requested kind, in menu order; None when no priced item is labelled that kind.
 
-    Dishes match by dish_in; 麵食/飯食 by ITEM_WORDS; a cuisine ending in a staple
-    (牛肉麵, 豬腳飯) by dish_in. Other cuisines (火鍋, 日式料理) have no item rule, so
-    every priced item counts. No request at all also counts every priced item.
+    Dishes match by has_dish, cuisines by item_labels. No request at all counts every priced item.
     """
     if criteria.dishes:
-        return [(i, p) for i, p in restaurant.menu_prices if any(dish_in(d, i) for d in criteria.dishes)]
-    rules = []
-    for cuisine in (ALIASES.get(c, c) for c in criteria.cuisines):
-        if cuisine in ITEM_WORDS:
-            rules.append(lambda i, words=ITEM_WORDS[cuisine]: any(w in i for w in words))
-        elif cuisine.endswith(STAPLES):
-            rules.append(lambda i, c=cuisine: dish_in(c, i))
-        else:
-            return None
-    return [(i, p) for i, p in restaurant.menu_prices if not rules or any(rule(i) for rule in rules)]
+        return [(i, p) for i, p in restaurant.menu_prices if any(has_dish(restaurant, d, i) for d in criteria.dishes)]
+    requested = {ALIASES.get(c, c) for c in criteria.cuisines}
+    if not requested:
+        return list(restaurant.menu_prices)
+    return [(i, p) for i, p in restaurant.menu_prices if requested & item_labels(restaurant, i)] or None
+
+
+def ranking_extras(r):
+    """Kinds the TF-IDF text adds to document_text, which stays as the embedding cache was built:
+    item kinds (炸物 for 唐揚雞) and 羹類."""
+    labels = cuisine_labels(r.cuisines)
+    items = {c for i in r.menu_items for c in item_labels(r, i)}
+    return sorted((items - BROAD - labels) | (labels & {"羹類"}))
 
 
 class RestaurantRetriever:
@@ -100,7 +125,7 @@ class RestaurantRetriever:
             raise ValueError("Semantic index must cover exactly the loaded restaurants")
         self.semantic = semantic
         # Keep each restaurant and its own vector together: no zip truncation.
-        documents = [tokenize(document_text(r)) for r in self.restaurants]
+        documents = [tokenize(" ".join((document_text(r), *ranking_extras(r)))) for r in self.restaurants]
         self.idf = calculate_idf(documents)
         self.index = tuple((r, calculate_tfidf(tokens, self.idf))
                            for r, tokens in zip(self.restaurants, documents, strict=True))
@@ -114,7 +139,9 @@ class RestaurantRetriever:
         # A shop that literally sells a requested dish satisfies the cuisine condition.
         if criteria.cuisines and not any(sells(restaurant, d) for d in criteria.dishes):
             requested = {ALIASES.get(c, c) for c in criteria.cuisines}
-            if not requested & labels:
+            # Items add shops for specific kinds only: almost every shop sells some rice or noodle dish.
+            specific = requested - BROAD
+            if not requested & labels and not any(specific & item_labels(restaurant, i) for i in restaurant.menu_items):
                 if not labels or any(PARENTS.get(c) in labels for c in requested):
                     unknown.append("料理細分類資料不足")
                 else:

@@ -117,6 +117,12 @@ class CriteriaTests(unittest.TestCase):
         self.assertEqual(result.criteria.cuisines, ("火鍋", "飯食"))
 
 
+    def test_bare_geng_is_the_geng_type_but_longer_names_win(self):
+        for message, cuisine in [("想吃羹", "羹類"), ("想吃魷魚羹", "魷魚羹"), ("想吃羹麵", "羹麵")]:
+            with self.subTest(message=message):
+                self.assertEqual(self.parser.parse(message, None).criteria.cuisines, (cuisine,))
+
+
 class ConversationTests(unittest.TestCase):
     def test_required_multiturn_sequence_and_reset(self):
         pipeline = RecommendationPipeline()

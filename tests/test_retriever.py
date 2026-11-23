@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from food_crag.dataset import load_restaurants
 from food_crag.domain import Restaurant, SearchCriteria
 from food_crag.pipeline import RecommendationPipeline
-from food_crag.retriever import RestaurantRetriever, cuisine_labels, fitting_items
+from food_crag.retriever import RestaurantRetriever, cuisine_labels, fitting_items, item_labels
 from food_crag.server import create_server
 from food_crag.tfidf import calculate_idf, calculate_tf, cosine_similarity, tokenize
 
@@ -57,6 +57,44 @@ class ItemPriceTests(unittest.TestCase):
         ids = {c.restaurant.id for c in result.candidates}
         self.assertNotIn("DL-031", ids)  # 蛋餅 35 元, but its noodles start at 90 元.
         self.assertIn("DL-028", ids)
+
+
+class ItemLabelTests(unittest.TestCase):
+    """Menu items join specific kinds (user decisions 2026-11-23); 麵食/飯食 stay shop-level."""
+    @classmethod
+    def setUpClass(cls):
+        cls.restaurants = load_restaurants()
+        cls.catalog = {r.id: r for r in cls.restaurants}
+        cls.retriever = RestaurantRetriever(cls.restaurants)
+
+    def found(self, cuisine, budget=None):
+        report = self.retriever.search(cuisine, SearchCriteria(cuisines=(cuisine,), budget_twd=budget), limit=40)
+        return {c.restaurant.id for c in report.candidates}
+
+    def test_keywords_and_hand_labels(self):
+        labels = lambda shop, item: item_labels(self.catalog[shop], item)
+        self.assertEqual(labels("DL-033", "鍋燒泡飯"), {"飯食"})  # 鍋燒 is noodles, except with rice.
+        self.assertIn("麵食", labels("DL-032", "韓式部隊鍋燒"))
+        self.assertNotIn("火鍋", labels("DL-032", "韓式部隊鍋燒"))
+        self.assertEqual(labels("DL-019", "唐揚雞"), {"炸物"})
+        self.assertTrue({"羹類", "麵食"} <= labels("DL-009", "魷魚羹麵"))
+        self.assertEqual(labels("DL-030", "一品牛五花"), {"火鍋"})
+        self.assertEqual(labels("DL-028", "牛肉湯麵"), {"麵食"})  # Hand label: no beef in it.
+        self.assertEqual(labels("DL-031", "奶油麵包"), {"甜點"})  # Not in any menu yet; rule only.
+        self.assertIn("羹類", cuisine_labels(("羹麵",)))
+
+    def test_shops_found_through_their_menu(self):
+        self.assertEqual(self.found("炒飯"), {"DL-013", "DL-018"})
+        self.assertIn("DL-019", self.found("炸物"))
+        self.assertTrue({"DL-015", "DL-026"} <= self.found("火鍋"))
+        self.assertTrue({"DL-012", "DL-015", "DL-031"} <= self.found("義大利麵"))
+        self.assertEqual(self.found("羹類"), {"DL-002", "DL-004", "DL-008", "DL-009"})
+        self.assertNotIn("DL-006", self.found("麵食"))  # 羊肉麵線 alone does not make a noodle shop.
+
+    def test_hand_labelled_item_needs_the_literal_dish(self):
+        self.assertFalse(self.found("牛肉麵", 50))  # 牛肉湯麵 50 元 has no beef: the real ones cost more.
+        report = self.retriever.search("牛肉湯麵", SearchCriteria(dishes=("牛肉湯麵",)))
+        self.assertIn("DL-028", {c.restaurant.id for c in report.candidates})
 
 
 class MathTests(unittest.TestCase):

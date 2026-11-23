@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .criteria import CUISINES
 from .domain import Restaurant
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -97,6 +98,10 @@ def validate_records(records):
         _require(isinstance(prices, dict) and set(prices) <= set(items)
                  and all(type(v) is int and v > 0 for v in prices.values()),
                  f"{label}: menu_prices must map menu_items to positive integers")
+        tags = record.get("item_tags", {})  # Optional hand labels for names keywords misread.
+        _require(isinstance(tags, dict) and set(tags) <= set(items)
+                 and all(isinstance(v, list) and set(v) <= set(CUISINES) for v in tags.values()),
+                 f"{label}: item_tags must map menu_items to known cuisines")
         for field in ("opening_hours", "price_evidence"):
             _require(record[field] is None or _text(record[field]), f"{label}.{field}: expected text or null")
         for field in ("price_min_twd", "price_max_twd"):
@@ -172,8 +177,9 @@ def load_restaurants(path=DEFAULT_DATA_PATH, extra=None):
     """Explicitly map metadata and lists; never pass arbitrary JSON kwargs."""
     result = []
     for record in read_records(path, extra):
-        fields = {key: record[key] for key in Restaurant.__dataclass_fields__ if key != "menu_prices"}
+        fields = {key: record[key] for key in Restaurant.__dataclass_fields__ if key not in ("menu_prices", "item_tags")}
         fields["menu_prices"] = tuple(record.get("menu_prices", {}).items())
+        fields["item_tags"] = tuple((item, tuple(tags)) for item, tags in record.get("item_tags", {}).items())
         for key in ("source_urls", "cuisines", "menu_items", "landmarks", "sources", "notes"):
             fields[key] = tuple(fields[key])
         if fields["meal_periods"] is not None:

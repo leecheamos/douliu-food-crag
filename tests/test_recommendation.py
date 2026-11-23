@@ -89,15 +89,16 @@ class TemplateReplyTests(unittest.TestCase):
         self.assertNotIn("紅燒牛肉麵", result.reply.split("\n\n")[0])
 
     def test_no_shop_replies_are_conversational_with_next_steps(self):
-        fried_rice = SearchCriteria(cuisines=("炒飯",))  # No shop is tagged 炒飯, rice shops are unknown.
-        result = self.generator.generate(fried_rice, self.retriever.search("炒飯", fried_rice),
+        fried = [replace(r, menu_items=(), menu_prices=(), item_tags=()) for r in self.restaurants]
+        fried_rice = SearchCriteria(cuisines=("炒飯",))  # Without menus no shop is 炒飯, rice shops are unknown.
+        result = self.generator.generate(fried_rice, RestaurantRetriever(fried).search("炒飯", fried_rice),
                                          Evaluation("clarify", ("x",), "insufficient"))
         self.assertEqual(result.reply, "資料裡還沒有店被分到炒飯，我先不亂推薦。要不要換成飯食，或看看其他類型？")
         self.assertEqual(result.quick_replies, ("想吃飯食", "還有其他的嗎？"))
-        steak = SearchCriteria(cuisines=("牛排",), budget_twd=300)  # The one steak shop costs more.
+        steak = SearchCriteria(cuisines=("牛排",), budget_twd=300)  # 西堤 and 陶板屋's 牛排 items cost more.
         result = self.generator.generate(steak, self.retriever.search("牛排", steak),
                                          Evaluation("stop", ("x",), "no_results"))
-        self.assertEqual(result.reply, "牛排的店有 1 家，但價格都超過 300 元，所以這次先不推薦，"
+        self.assertEqual(result.reply, "牛排的店有 2 家，但價格都超過 300 元，所以這次先不推薦，"
                                        "也沒有自己放寬你的條件。要不要取消預算限制，或換個類型？")
         self.assertEqual(result.quick_replies, ("取消預算限制", "還有其他的嗎？"))
 
