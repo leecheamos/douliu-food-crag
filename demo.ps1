@@ -78,6 +78,6 @@ $test = Invoke-RestMethod -Method Post -Uri "https://api.line.me/v2/bot/channel/
 if (-not $test.success) { Stop-Demo "LINE 測試失敗：$($test.statusCode) $($test.reason)" }
 Write-Host "  LINE 測試成功（HTTP $($test.statusCode)）"
 
-Write-Host "`n✔ 可以開始測試或錄影了！用手機傳訊息給 @849yeaxp。" -ForegroundColor Green
+Write-Host "`n✔ 可以開始測試或錄影了！用手機傳訊息給 LINE 機器人。" -ForegroundColor Green
 Write-Host "  查看回覆紀錄（含每次延遲秒數）：docker compose logs -f app"
 Write-Host "  結束：docker compose down（網址會失效，下次執行本腳本會自動換新）"

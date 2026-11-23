@@ -1,12 +1,29 @@
 # 餐廳資料
 
-- `restaurants.json`：第 3 項整理的正式格式資料，狀態為 documented；已由使用者接受。2026-11-19 起共 31 家（DL-001 改為晴 Haru，DL-011 併入 DL-010）。
-- `restaurants.draft.json`：2026-09-07 原始 32 筆草稿，保留不改寫。
-- [資料預覽與限制](RESTAURANTS_PREVIEW.md)
-- [欄位契約](DATA_FIELDS.md)
+| 檔案 | 內容 | 進 git |
+|---|---|---|
+| `restaurants.json` | 32 家（DL-001～DL-033，DL-011 併入 DL-010），依菜單照片人工整理 | 是 |
+| `restaurants.draft.json` | 2026-09-07 原始草稿，保留不改寫 | 是 |
+| `restaurants_google.json` | 90 家（DL-101～DL-190），Google Places 收集 | 否（Google 使用條款不得轉發） |
+| `places_raw.json`、`places_review.csv` | Google 收集的原始資料與人工檢查表 | 否 |
+| `embeddings/*.json` | Embedding 向量快取；含 Google 資料的快取不進 git | 部分 |
 
-以 `python -B -m food_crag.dataset` 驗證（在專案目錄先設定 `$env:PYTHONPATH = 'src'`）；`load_restaurants()` 使用明確欄位映射，保留來源與未知值，不直接對草稿呼叫 `Restaurant(**record)`。
+- [欄位說明](DATA_FIELDS.md)
+- [資料預覽與限制](RESTAURANTS_PREVIEW.md)（第 3 項當時的預覽）
 
-31 家都有依菜單照片整理的**主餐單品標價範圍**（不是每人整餐費用；最便宜主餐 ≤ 預算即視為符合預算）；3 家有菜單摘要、3 家有來源列示時段、1 家有地標標記，皆不保證即時營業或完整菜單。午晚餐供應未知。地標不是距離計算。資料載入尚未接入聊天／推薦端點。
+## 32 家菜單資料
 
-資料檢查涵蓋唯一 ID、店名與地址重複、必要欄位、斗六範圍、型別、日期、來源網址對應及證據欄位。來源紀錄含搜尋索引及人工提供，格式檢查不能代替實地查核。
+- 每家都有主餐價格範圍、菜單摘要與完整主餐清單（menu_items，共 581 道）。
+- 27 家有逐道價格（menu_prices，共 482 道，取最小份的單品價）；5 家套餐或鍋物組合店只有價格範圍。
+- 每道菜由關鍵字表判斷分類；判斷不了或會判錯的 21 道另外人工標註（item_tags）。
+- 3 家有營業時段、1 家有地標標記。
+- 價格是菜單上的單品價，不是每人整餐費用；都沒有向店家確認即時營業或價格。
+
+## 驗證
+
+```powershell
+$env:PYTHONPATH = 'src'
+python -B -m food_crag.dataset
+```
+
+預期輸出 records=32、with_price=32、with_menu=32。檢查內容包括唯一 ID、店名與地址重複、必要欄位、斗六範圍、型別、日期、來源網址，以及菜名、價格、人工分類必須出自菜單清單。格式檢查不能代替實地查核。
