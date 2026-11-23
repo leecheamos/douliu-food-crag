@@ -61,6 +61,35 @@ def sells(restaurant, dish):
     return any(dish_in(dish, text) for text in texts)
 
 
+NO_PRICE = "缺少有來源的主餐標價資料"
+ROUGH_PRICE = "只有 Google 粗略價位，無法確認是否在預算內"
+BUDGET_UNKNOWN = {NO_PRICE, ROUGH_PRICE}
+OVER_BUDGET = {"最便宜的主餐標價超出預算", "符合的品項標價都超出預算"}
+
+# Words that make a menu item count as the broad 麵食/飯食 types (user decision 2026-11-23).
+ITEM_WORDS = {"麵食": ("麵", "米粉", "冬粉", "粄條", "粿仔"), "飯食": ("飯", "粥", "米糕", "丼")}
+
+
+def fitting_items(restaurant, criteria):
+    """(item, price) pairs of the requested kind, in menu order; None when the kind cannot be told from names.
+
+    Dishes match by dish_in; 麵食/飯食 by ITEM_WORDS; a cuisine ending in a staple
+    (牛肉麵, 豬腳飯) by dish_in. Other cuisines (火鍋, 日式料理) have no item rule, so
+    every priced item counts. No request at all also counts every priced item.
+    """
+    if criteria.dishes:
+        return [(i, p) for i, p in restaurant.menu_prices if any(dish_in(d, i) for d in criteria.dishes)]
+    rules = []
+    for cuisine in (ALIASES.get(c, c) for c in criteria.cuisines):
+        if cuisine in ITEM_WORDS:
+            rules.append(lambda i, words=ITEM_WORDS[cuisine]: any(w in i for w in words))
+        elif cuisine.endswith(STAPLES):
+            rules.append(lambda i, c=cuisine: dish_in(c, i))
+        else:
+            return None
+    return [(i, p) for i, p in restaurant.menu_prices if not rules or any(rule(i) for rule in rules)]
+
+
 class RestaurantRetriever:
     def __init__(self, restaurants, semantic=None):
         self.restaurants = tuple(restaurants)
@@ -99,12 +128,18 @@ class RestaurantRetriever:
         supported = {field for source in restaurant.sources for field in source.get("supports", ())}
         if criteria.budget_twd is not None:
             low, high = restaurant.price_min_twd, restaurant.price_max_twd
-            # Prices are listed main-dish single-item prices, not per-person
-            # meal cost: a shop fits when its cheapest main dish is in budget.
-            if not restaurant.price_evidence or "price_evidence" not in supported or low is None:
-                unknown.append("缺少有來源的主餐標價資料")
+            # Prices are listed single-item prices, not per-person meal cost. With item
+            # prices the requested kind must fit; otherwise the cheapest main dish decides.
+            fitting = fitting_items(restaurant, criteria) if "price_evidence" in supported else None
+            if fitting:  # Item prices known: the requested kind itself must fit the budget.
+                if min(p for _, p in fitting) > criteria.budget_twd:
+                    excluded.append("符合的品項標價都超出預算")
+            elif not restaurant.price_evidence or "price_evidence" not in supported or low is None:
+                unknown.append(NO_PRICE)
             elif low > criteria.budget_twd:
                 excluded.append("最便宜的主餐標價超出預算")
+            elif low <= 1 and criteria.budget_twd < high:  # Google's "up to N" bracket says nothing below N.
+                unknown.append(ROUGH_PRICE)
         # Meal is a preference (user decision 2026-11-20): almost no shop has
         # sourced service periods, so unknown periods pass and the reply asks the
         # user to check opening hours. Only a sourced mismatch excludes a shop.

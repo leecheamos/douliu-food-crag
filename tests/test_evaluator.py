@@ -56,7 +56,7 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(self.model.calls[0]["criteria"]["excluded_cuisines"], ("火鍋",))
 
     def test_missing_price_and_empty_results_do_not_call_model(self):
-        unpriced = RestaurantRetriever([replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None)
+        unpriced = RestaurantRetriever([replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None, menu_prices=())
                                         for r in load_restaurants()])
         for retriever, criteria, expected in [(unpriced, replace(self.criteria, budget_twd=200), "clarify"),
                                               (self.retriever, replace(self.criteria, district="虎尾鎮"), "stop")]:

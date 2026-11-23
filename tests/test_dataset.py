@@ -61,6 +61,8 @@ class DatasetTests(unittest.TestCase):
             "reversed prices": lambda r: r.update(price_min_twd=200, price_max_twd=100, price_evidence="test"),
             "missing provenance": lambda r: r.update(sources=[]),
             "invalid URL": lambda r: r["source_urls"].append("javascript:alert(1)"),
+            "price for unlisted dish": lambda r: r.update(menu_prices={"不在菜單上的菜": 50}),
+            "non-positive dish price": lambda r: r.update(menu_prices={r["menu_items"][0]: 0}),
             "unmatched URL": lambda r: r["source_urls"].append("https://example.com/extra"),
             "unreviewed draft": lambda r: r.update(review_status="draft"),
             "unsupported landmark": lambda r: r.update(landmarks=["火車站"]),

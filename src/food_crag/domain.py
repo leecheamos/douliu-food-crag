@@ -31,6 +31,7 @@ class Restaurant:
     price_evidence: str | None = None
     menu_summary: str = ""
     menu_items: tuple[str, ...] = ()  # Every main dish name on the menu photo.
+    menu_prices: tuple[tuple[str, int], ...] = ()  # (item, cheapest size price) in menu order; may be partial.
     opening_hours: str | None = None
     landmarks: tuple[str, ...] = ()
     sources: tuple[dict, ...] = ()

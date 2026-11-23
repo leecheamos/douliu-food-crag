@@ -15,6 +15,8 @@ class Settings:
     line_channel_secret: str = field(default="", repr=False)
     line_channel_access_token: str = field(default="", repr=False)
     chat_api_enabled: bool = True  # /api/chat is a local testing entry; disable when public.
+    google_maps_api_key: str = field(default="", repr=False)  # Only the offline collector uses it.
+    google_data_file: str = ""  # Gitignored Google Places records merged at load time (item 12).
 
     @classmethod
     def from_env(cls, env_file=None) -> "Settings":
@@ -50,4 +52,6 @@ class Settings:
             line_channel_secret=values.get("LINE_CHANNEL_SECRET", ""),
             line_channel_access_token=values.get("LINE_CHANNEL_ACCESS_TOKEN", ""),
             chat_api_enabled=chat_api in {"true", "1", ""},
+            google_maps_api_key=values.get("GOOGLE_MAPS_API_KEY", "").strip(),
+            google_data_file=values.get("GOOGLE_DATA_FILE", "").strip(),
         )

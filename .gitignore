@@ -7,3 +7,8 @@ build/
 dist/
 data/index/
 logs/
+# Google Places content must not be redistributed (item 12): keep it local.
+data/places_raw.json
+data/places_review.csv
+data/restaurants_google.json
+data/embeddings/*.google.json

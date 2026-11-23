@@ -51,7 +51,7 @@ class CriteriaTests(unittest.TestCase):
             "午餐和晚餐", "雲科大和斗六車站附近", "台北吃麵", "虎尾鎮吃麵",
             "200元以內，花生過敏", "不要不吃火鍋", "不是不吃火鍋",
             "不想吃火鍋也可以", "不吃晚餐", "不要在雲科大附近", "走路5分鐘內",
-            "素食", "外帶", "不要太辣", "重設後想吃麵", "嗨",
+            "清真", "外帶", "不要太辣", "重設後想吃麵", "嗨",
             "不要火鍋，牛排", "不要麵，牛肉麵也可以",
         ]
         for message in messages:
@@ -60,6 +60,16 @@ class CriteriaTests(unittest.TestCase):
                 self.assertTrue(result.questions)
                 self.assertEqual(result.criteria, previous)
                 self.assertFalse(result.reset)
+
+    def test_item12_categories_but_category_plus_staple_is_a_dish(self):
+        self.assertEqual(self.parser.parse("想吃雞排").criteria.cuisines, ("炸物",))
+        self.assertEqual(self.parser.parse("想吃炒飯").criteria.cuisines, ("炒飯",))
+        self.assertEqual(self.parser.parse("麵飯都可以").criteria.cuisines, ("麵食", "飯食"))
+        for dish in ("雞排飯", "咖哩飯", "日式便當"):  # The model fallback keeps the dish name.
+            with self.subTest(dish=dish):
+                result = self.parser.parse(dish)
+                self.assertTrue(result.unparsed)
+                self.assertEqual(result.criteria, SearchCriteria())
 
     def test_no_landmark_cannot_resolve_nearby(self):
         result = self.parser.parse("附近吃麵")

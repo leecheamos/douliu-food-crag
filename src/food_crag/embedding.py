@@ -29,8 +29,9 @@ class EmbeddingCacheError(ValueError):
     pass
 
 
-def cache_path(model: str) -> Path:
-    return CACHE_DIR / f"{model}.json"
+def cache_path(model: str, with_google: bool = False) -> Path:
+    # Vectors of Google Places shops go to a separate, gitignored cache.
+    return CACHE_DIR / (f"{model}.google.json" if with_google else f"{model}.json")
 
 
 def text_hash(text: str) -> str:
@@ -129,7 +130,8 @@ def load_from_settings(restaurants, settings: Settings):
     if not settings.embedding_model:
         return None, "disabled"
     try:
-        return load_index(restaurants, GeminiEmbedder(settings), settings.embedding_model), "hybrid_rrf"
+        path = cache_path(settings.embedding_model, bool(settings.google_data_file))
+        return load_index(restaurants, GeminiEmbedder(settings), settings.embedding_model, path), "hybrid_rrf"
     except EmbeddingCacheError as error:
         return None, str(error)
 
@@ -142,9 +144,10 @@ def main():
     if not settings.embedding_model:
         print("EMBEDDING_MODEL is empty; set it (e.g. gemini-embedding-001) first.")
         return 1
-    restaurants = load_restaurants()
+    restaurants = load_restaurants(extra=settings.google_data_file or None)
     try:
-        path = build_cache(restaurants, GeminiEmbedder(settings), settings.embedding_model)
+        path = build_cache(restaurants, GeminiEmbedder(settings), settings.embedding_model,
+                           cache_path(settings.embedding_model, bool(settings.google_data_file)))
     except GeminiError as error:
         print(f"Embedding failed: {error}")
         return 1

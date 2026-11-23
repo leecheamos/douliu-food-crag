@@ -8,7 +8,8 @@ from urllib.parse import urlsplit
 
 from .domain import Restaurant
 
-DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "restaurants.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "restaurants.json"
 SOURCE_TYPES = {
     "restaurant_official", "government", "media", "blog", "partner",
     "delivery_platform", "corporate_document", "personal_recommendation",
@@ -92,6 +93,10 @@ def validate_records(records):
         items = record["menu_items"]
         _require(isinstance(items, list) and all(_text(i) for i in items) and len(items) == len(set(items)),
                  f"{label}: menu_items must be unique non-empty strings")
+        prices = record.get("menu_prices", {})  # Optional: Google records have no menu.
+        _require(isinstance(prices, dict) and set(prices) <= set(items)
+                 and all(type(v) is int and v > 0 for v in prices.values()),
+                 f"{label}: menu_prices must map menu_items to positive integers")
         for field in ("opening_hours", "price_evidence"):
             _require(record[field] is None or _text(record[field]), f"{label}.{field}: expected text or null")
         for field in ("price_min_twd", "price_max_twd"):
@@ -116,7 +121,7 @@ def validate_records(records):
             _require(_text(source["publisher"]), f"{label}: missing publisher")
             _require(_text(source["source_type"]) and source["source_type"] in SOURCE_TYPES, f"{label}: invalid source type")
             method = source["access_method"]
-            _require(_text(method) and method in {"page", "search_index", "manual_entry"}, f"{label}: invalid access method")
+            _require(_text(method) and method in {"page", "search_index", "manual_entry", "api"}, f"{label}: invalid access method")
             _require(_strings(source["supports"]) and source["supports"], f"{label}: missing supported fields")
             supported.update(source["supports"])
             _date(source["checked_at"], f"{label}.source.checked_at", nullable=method == "manual_entry")
@@ -139,7 +144,7 @@ def validate_records(records):
         _require(urls == set(record["source_urls"]), f"{label}: source URLs do not match provenance")
         _require({"name", "address", "cuisines"} <= supported, f"{label}: missing name/address/cuisine provenance")
         _require(record["checked_at"] == (max(checked) if checked else None), f"{label}: checked_at must match latest source review")
-        if low is not None or high is not None:
+        if low is not None or high is not None or prices:
             _require("price_evidence" in supported, f"{label}: price missing source support")
         if record["landmarks"]:
             _require("landmarks" in supported, f"{label}: landmarks missing source support")
@@ -149,19 +154,26 @@ def validate_records(records):
     return records
 
 
-def read_records(path=DEFAULT_DATA_PATH):
-    try:
-        records = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, ValueError) as error:
-        raise DatasetError(f"Cannot read restaurant dataset: {error}") from error
+def read_records(path=DEFAULT_DATA_PATH, extra=None):
+    """extra: optional second file (the gitignored Google Places records), validated together."""
+    records = []
+    for file in (path, extra):
+        if file is None:
+            continue
+        file = Path(file) if Path(file).is_absolute() else PROJECT_ROOT / file
+        try:
+            records += json.loads(file.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, ValueError, TypeError) as error:
+            raise DatasetError(f"Cannot read restaurant dataset: {error}") from error
     return validate_records(records)
 
 
-def load_restaurants(path=DEFAULT_DATA_PATH):
+def load_restaurants(path=DEFAULT_DATA_PATH, extra=None):
     """Explicitly map metadata and lists; never pass arbitrary JSON kwargs."""
     result = []
-    for record in read_records(path):
-        fields = {key: record[key] for key in Restaurant.__dataclass_fields__}
+    for record in read_records(path, extra):
+        fields = {key: record[key] for key in Restaurant.__dataclass_fields__ if key != "menu_prices"}
+        fields["menu_prices"] = tuple(record.get("menu_prices", {}).items())
         for key in ("source_urls", "cuisines", "menu_items", "landmarks", "sources", "notes"):
             fields[key] = tuple(fields[key])
         if fields["meal_periods"] is not None:

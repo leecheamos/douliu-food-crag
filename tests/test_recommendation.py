@@ -45,7 +45,7 @@ class TemplateReplyTests(unittest.TestCase):
                 self.assertIn(fact, result.reply)
         # Conversational lead restating the conditions and each shop's signature dishes.
         self.assertTrue(result.reply.startswith("想吃麵食、不要火鍋的話，我推薦這 2 家："))
-        self.assertIn("烹小鮮麵館，主要賣豬油拌飯、乾拌麵和燒餅", result.reply)
+        self.assertIn("\n2.烹小鮮麵館，主要賣：豬油拌飯、乾拌麵和燒餅。", result.reply)
         self.assertIn("價格：主餐約 40～110 元", result.reply)
         self.assertIn("不是整餐費用", result.reply)
         self.assertNotIn("資料來源", result.reply)
@@ -76,17 +76,38 @@ class TemplateReplyTests(unittest.TestCase):
         report = retriever.search("麵食", self.criteria)
         result = TemplateReplyGenerator([priced]).generate(self.criteria, report, self.accept(["DL-017"]))
         self.assertIn("價格：主餐約 90～160 元", result.reply)
-        unpriced = replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None)
+        unpriced = replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None, menu_prices=())
         result = TemplateReplyGenerator([unpriced]).generate(self.criteria, report, self.accept(["DL-017"]))
         self.assertIn("價格：未知", result.reply)
 
+    def test_budget_lines_list_only_in_budget_items_of_the_requested_kind(self):
+        criteria = replace(self.criteria, budget_twd=100)
+        report = self.retriever.search("麵食", criteria)
+        result = self.generator.generate(criteria, report, self.accept(["DL-027"]))
+        # 紅燒牛肉麵 135 元 is the signature but over budget; 香妃鴨飯 is rice. Max 3, menu order.
+        self.assertIn("\n1.賣麥面麵食館，100 元以內有：餛飩乾拌麵 85 元、餛飩湯麵 85 元、麻醬乾拌麵 60 元。", result.reply)
+        self.assertNotIn("紅燒牛肉麵", result.reply.split("\n\n")[0])
+
+    def test_no_shop_replies_are_conversational_with_next_steps(self):
+        fried_rice = SearchCriteria(cuisines=("炒飯",))  # No shop is tagged 炒飯, rice shops are unknown.
+        result = self.generator.generate(fried_rice, self.retriever.search("炒飯", fried_rice),
+                                         Evaluation("clarify", ("x",), "insufficient"))
+        self.assertEqual(result.reply, "資料裡還沒有店被分到炒飯，我先不亂推薦。要不要換成飯食，或看看其他類型？")
+        self.assertEqual(result.quick_replies, ("想吃飯食", "還有其他的嗎？"))
+        steak = SearchCriteria(cuisines=("牛排",), budget_twd=300)  # The one steak shop costs more.
+        result = self.generator.generate(steak, self.retriever.search("牛排", steak),
+                                         Evaluation("stop", ("x",), "no_results"))
+        self.assertEqual(result.reply, "牛排的店有 1 家，但價格都超過 300 元，所以這次先不推薦，"
+                                       "也沒有自己放寬你的條件。要不要取消預算限制，或換個類型？")
+        self.assertEqual(result.quick_replies, ("取消預算限制", "還有其他的嗎？"))
+
     def test_insufficient_no_results_and_error_replies_are_readable_without_ids(self):
         budget = replace(self.criteria, budget_twd=200)
-        unpriced = [replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None) for r in self.restaurants]
+        unpriced = [replace(r, price_min_twd=None, price_max_twd=None, price_evidence=None, menu_prices=()) for r in self.restaurants]
         cases = [
             (budget, RestaurantRetriever(unpriced).search("麵食", budget), Evaluation("clarify", ("x",), "insufficient"),
-             "缺少有來源的主餐標價資料"),
-            (self.criteria, self.report, Evaluation("stop", ("x",), "no_results"), "沒有同時符合"),
+             "這些店沒有確切的標價，沒辦法確定 200 元吃得到"),
+            (self.criteria, self.report, Evaluation("stop", ("x",), "no_results"), "也沒有自己放寬你的條件"),
             (self.criteria, self.report, Evaluation("stop", ("Gemini 評估未完成：http_429",), "error", model_called=True),
              "請稍後再試"),
         ]

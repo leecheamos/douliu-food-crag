@@ -2,6 +2,7 @@
 import http.client
 import json
 import re
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -82,7 +83,8 @@ class GeminiEmbedder:
     """batchEmbedContents REST calls. task_type follows the Gemini API enum:
     RETRIEVAL_DOCUMENT for restaurant documents, RETRIEVAL_QUERY for queries."""
 
-    BATCH_SIZE = 100
+    BATCH_SIZE = 40
+    BATCH_PAUSE = 61  # shortcut: free tier counts each text per minute; drop the pause on a paid key.
 
     def __init__(self, settings: Settings, dimensions: int = 768):
         self.settings = settings
@@ -99,6 +101,8 @@ class GeminiEmbedder:
             raise GeminiError("invalid_task_type")
         vectors = []
         for start in range(0, len(texts), self.BATCH_SIZE):
+            if start:  # Only the offline cache build has several batches; a chat query is one text.
+                time.sleep(self.BATCH_PAUSE)
             batch = texts[start:start + self.BATCH_SIZE]
             body = {"requests": [{
                 "model": f"models/{model}", "content": {"parts": [{"text": text}]},

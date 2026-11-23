@@ -28,6 +28,7 @@
 | cuisines | 人工分類陣列，依來源菜色或店名整理，不表示完整菜單或飲食保證 |
 | menu_summary | 招牌品項（3 樣左右，依菜單照片），回覆「主要賣…」使用 |
 | menu_items | 菜單照片上的全部主餐名稱（不含小菜、湯、飲料）；空陣列表示未知。用於檢索文字與菜名比對（`retriever.sells`：字面包含，或主料＋同一主食結尾），非空時來源 supports 須含 menu_items |
+| menu_prices | 選填。`{菜名: 價格}`，菜名必須出自 menu_items，價格取菜單照片上最小份的單品價（正整數）；依菜單順序。有預算時，店裡要有一道「符合類型且在預算內」的菜才推薦，回覆也只列這些菜（最多 3 道）。套餐或鍋物組合（DL-020、023、024、029、030）不逐道標價，維持用 price_min_twd 判斷；Google 資料沒有此欄位。來源 supports 須含 price_evidence |
 | price_min_twd / price_max_twd | 每人餐費數值或 null；本稿全為 null，不拿單品或禮盒價冒充餐費 |
 | price_evidence | 價格依據或 null |
 | opening_hours | 來源列示時段文字或 null，不等於即時營業狀態 |

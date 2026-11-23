@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from food_crag.dataset import load_restaurants
 from food_crag.domain import Restaurant, SearchCriteria
 from food_crag.pipeline import RecommendationPipeline
-from food_crag.retriever import RestaurantRetriever, cuisine_labels
+from food_crag.retriever import RestaurantRetriever, cuisine_labels, fitting_items
 from food_crag.server import create_server
 from food_crag.tfidf import calculate_idf, calculate_tf, cosine_similarity, tokenize
 
@@ -24,6 +24,39 @@ def fixture(identifier="TEST-1", **changes):
                   sources=({"supports": ["price_evidence", "meal_periods", "landmarks"]},))
     values.update(changes)
     return Restaurant(**values)
+
+
+class ItemPriceTests(unittest.TestCase):
+    """Budget is checked on the requested kind of dish when item prices exist (2026-11-23)."""
+
+    def test_requested_kind_must_fit_budget_not_any_cheap_item(self):
+        rice_cheap = fixture(menu_items=("滷肉飯", "牛肉麵"), menu_prices=(("滷肉飯", 40), ("牛肉麵", 120)),
+                             price_min_twd=40, price_max_twd=120)
+        noodles = SearchCriteria(cuisines=("麵食",), budget_twd=100)
+        decision = RestaurantRetriever.filter(rice_cheap, noodles)
+        self.assertEqual((decision.outcome, decision.reasons), ("excluded", ("符合的品項標價都超出預算",)))
+        self.assertEqual(RestaurantRetriever.filter(rice_cheap, SearchCriteria(cuisines=("麵食",), budget_twd=120)).outcome,
+                         "eligible")
+        # No item rule for the type (火鍋) or no item prices: the shop's cheapest main dish decides.
+        self.assertIsNone(fitting_items(rice_cheap, SearchCriteria(cuisines=("火鍋",))))
+        self.assertEqual(RestaurantRetriever.filter(fixture(price_min_twd=40), noodles).outcome, "eligible")
+
+    def test_item_kinds(self):
+        shop = fixture(menu_items=("滷肉飯", "陽春麵", "米粉湯", "牛肉乾拌麵", "蛋餅"),
+                       menu_prices=(("滷肉飯", 30), ("陽春麵", 40), ("米粉湯", 45), ("牛肉乾拌麵", 90), ("蛋餅", 35)))
+        names = lambda **c: [i for i, _ in fitting_items(shop, SearchCriteria(**c))]
+        self.assertEqual(names(cuisines=("麵食",)), ["陽春麵", "米粉湯", "牛肉乾拌麵"])
+        self.assertEqual(names(cuisines=("飯食",)), ["滷肉飯"])
+        self.assertEqual(names(cuisines=("牛肉麵",)), ["牛肉乾拌麵"])
+        self.assertEqual(names(dishes=("滷肉飯",)), ["滷肉飯"])
+        self.assertEqual(len(names()), 5)
+
+    def test_real_data_noodles_under_50_drop_the_brunch_shop(self):
+        retriever = RestaurantRetriever(load_restaurants())
+        result = retriever.search("麵食", SearchCriteria(cuisines=("麵食",), budget_twd=50))
+        ids = {c.restaurant.id for c in result.candidates}
+        self.assertNotIn("DL-031", ids)  # 蛋餅 35 元, but its noodles start at 90 元.
+        self.assertIn("DL-028", ids)
 
 
 class MathTests(unittest.TestCase):

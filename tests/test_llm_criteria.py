@@ -1,9 +1,12 @@
 """Free-form fallback parser: model output is data and is validated locally."""
 import unittest
+from dataclasses import replace
 
+from food_crag.dataset import load_restaurants
 from food_crag.domain import SearchCriteria
 from food_crag.llm_criteria import GeminiCriteriaParser, to_criteria
 from food_crag.pipeline import RecommendationPipeline
+from food_crag.retriever import RestaurantRetriever
 
 
 def output(**changes):
@@ -119,7 +122,7 @@ class PipelineFallbackTests(unittest.TestCase):
                 self.assertEqual(result.status, "guidance")
                 self.assertEqual(result.reply, GUIDE_TEXT)
                 self.assertEqual(len(result.quick_replies), 4)
-                self.assertEqual(result.quick_replies[-1], "都可以")
+                self.assertEqual(result.quick_replies[-1], "還有其他的嗎？")
                 self.assertIsNone(pipeline.store.get("A"))
 
     def test_model_guidance_is_used_unless_it_names_a_shop(self):
@@ -134,7 +137,7 @@ class PipelineFallbackTests(unittest.TestCase):
     def test_guide_buttons_are_understood_and_lead_to_budget_buttons(self):
         model = FakeParserModel(error=RuntimeError("must not be called"))
         pipeline = RecommendationPipeline(model=AcceptModel(), parser_model=model)
-        for button in pipeline.guide_buttons:
+        for button in pipeline.guide_buttons[:3]:  # The last one asks for other types.
             with self.subTest(button=button):
                 result = pipeline.handle("B", button)
                 self.assertEqual(result.status, "criteria_updated")
@@ -145,6 +148,42 @@ class PipelineFallbackTests(unittest.TestCase):
         self.assertEqual(len(cuisines), 3)
         self.assertEqual(len(set(cuisines)), 3)  # Variety when no cuisine is set.
         self.assertEqual(pipeline.handle("B", "200元以內").quick_replies, ())
+
+    def test_more_offers_other_types_then_next_shops_then_says_none_left(self):
+        pipeline = RecommendationPipeline(model=AcceptModel(), parser_model=FakeParserModel(error=RuntimeError("x")))
+        first = pipeline.handle("A", "還有其他的嗎？")  # Nothing listed yet: other types.
+        self.assertEqual((first.status, first.quick_replies), ("guidance", pipeline.other_buttons))
+        self.assertTrue(pipeline.other_buttons)
+        self.assertFalse({"想吃飯食", "想吃麵食"} & set(pipeline.other_buttons))
+        for button in pipeline.other_buttons:  # Every button finds shops.
+            self.assertTrue(pipeline.handle("B", button).restaurant_ids, button)
+        listed = set(pipeline.handle("A", "想吃麵").restaurant_ids)
+        while True:
+            more = pipeline.handle("A", "還有別的嗎")
+            if not more.restaurant_ids:
+                break
+            self.assertFalse(listed & set(more.restaurant_ids))  # Never repeats a shop.
+            listed |= set(more.restaurant_ids)
+        self.assertEqual((more.reply, more.quick_replies), ("同樣的條件沒有更多店家了，要不要換個類型？", pipeline.other_buttons))
+        self.assertGreater(len(listed), 3)
+        pipeline.handle("A", "重設")
+        self.assertEqual(pipeline.handle("A", "其他").reply, "還有這些可以選，點一個看看：")
+
+    def test_unconfirmable_prices_offer_to_drop_budget(self):
+        from food_crag.domain import SearchCriteria as S
+        pipeline = RecommendationPipeline(model=AcceptModel(), parser_model=FakeParserModel(error=RuntimeError("x")))
+        rough = [replace(r, price_min_twd=1, price_max_twd=200, menu_prices=(),
+                         sources=(*r.sources, {"publisher": "Google Places API", "supports": ["price_evidence"]}))
+                 for r in pipeline.retriever.restaurants]
+        pipeline = RecommendationPipeline(retriever=RestaurantRetriever(rough), model=AcceptModel(),
+                                          parser_model=FakeParserModel(error=RuntimeError("x")))
+        blocked = pipeline.handle("A", "想吃麵，100元以內")
+        self.assertEqual(blocked.restaurant_ids, ())
+        # Conversational: no condition summary, the budget is named, two next steps.
+        self.assertEqual(blocked.reply, "麵食有 6 家，不過你目前的預算還是 100 元以內，這些店只有 Google 的粗略價位，"
+                                        "沒辦法確定 100 元吃得到。要不要取消預算限制，我再幫你找？")
+        self.assertEqual(blocked.quick_replies, ("取消預算限制", "還有其他的嗎？"))
+        self.assertTrue(pipeline.handle("A", "取消預算限制").restaurant_ids)
 
     def test_only_shops_that_sell_the_dish_are_recommended(self):
         model = FakeParserModel(output(cuisines=["麵食"], dishes=["牛肉麵"]))
@@ -177,11 +216,16 @@ class PipelineFallbackTests(unittest.TestCase):
         self.assertFalse(sells(shop("蝦仁炒麵"), "炒飯"))       # one-character main part stays literal
         self.assertFalse(sells(shop(summary="豬排、白飯"), "豬排飯"))  # summary checked per item
 
-    def test_dish_with_budget_says_budget_is_per_shop(self):
+    def test_dish_with_budget_lists_priced_dishes_and_per_shop_note_only_without_prices(self):
         model = FakeParserModel(output(cuisines=["麵食"], dishes=["牛肉麵"], budget_twd=150))
         result = RecommendationPipeline(model=AcceptModel(), parser_model=model).handle("A", "牛肉麵 150 塊左右")
         self.assertTrue(result.restaurant_ids)
-        self.assertIn("預算是用店內最便宜的主餐判斷，不一定是牛肉麵的價格", result.reply)
+        self.assertIn("150 元以內有：牛肉麵 100 元", result.reply)  # DL-028, per-item price.
+        self.assertNotIn("預算是用店內最便宜的主餐判斷", result.reply)
+        model = FakeParserModel(output(cuisines=["麵食"], dishes=["牛肉麵"], budget_twd=150))
+        unpriced = RestaurantRetriever([replace(r, menu_prices=()) for r in load_restaurants()])
+        pipeline = RecommendationPipeline(retriever=unpriced, model=AcceptModel(), parser_model=model)
+        self.assertIn("預算是用店內最便宜的主餐判斷，不一定是牛肉麵的價格", pipeline.handle("A", "牛肉麵 150 塊左右").reply)
 
     def test_rule_dish_names_reset_when_food_wish_changes(self):
         model = FakeParserModel(output(cuisines=["飯食"], dishes=["豬排飯"]))

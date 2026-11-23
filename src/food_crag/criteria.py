@@ -22,11 +22,18 @@ CUISINES = {
     "刈包": ("刈包",), "簡餐": ("簡餐",),
     "肉圓": ("肉圓",), "和風洋食": ("和風洋食",),
     "米糕": ("米糕", "筒仔米糕"),
+    # Item 12 categories for Google Places shops. 咖哩 has no bare alias so 咖哩飯 stays a dish.
+    "炸物": ("炸物", "炸雞排", "雞排", "炸雞", "鹽酥雞"), "炒飯": ("炒飯",), "便當": ("便當",),
+    "小吃": ("小吃",), "早餐": ("早餐",), "咖哩": ("咖哩料理",),
+    "韓式料理": ("韓式料理", "韓國料理", "韓式"), "南洋料理": ("南洋料理", "泰式", "泰國菜", "越南菜", "越式"),
+    "素食": ("素食", "蔬食"), "燒烤": ("燒烤", "燒肉", "串燒", "居酒屋"),
+    "鍋貼水餃": ("鍋貼水餃", "鍋貼", "水餃", "餃子"), "甜點": ("甜點", "豆花", "剉冰"), "速食": ("速食", "漢堡"),
 }
 ALIASES = {alias: canonical for canonical, aliases in CUISINES.items() for alias in aliases}
 PARENTS = {
     "牛肉麵": "麵食", "鍋燒意麵": "麵食", "拉麵": "麵食", "義大利麵": "麵食", "羹麵": "麵食",
     "肉燥飯": "飯食", "豬腳飯": "飯食", "菜飯": "飯食", "蛋飯": "飯食", "米糕": "飯食",
+    "炒飯": "飯食", "便當": "飯食",
 }
 LANDMARKS = {
     "雲林科技大學": ("雲林科技大學", "雲科大"),
@@ -128,7 +135,7 @@ class RuleCriteriaParser:
         if "附近" in text and current.landmark is None:
             questions.append("請指定地標，例如「斗六車站附近」；目前不使用定位或計算距離。")
 
-        positive, negative, remove_excluded = [], [], []
+        positive, negative, remove_excluded, dish_words = [], [], [], []
         additive = False
         last_end, last_negative = 0, False
         cuisine_text = text
@@ -137,6 +144,9 @@ class RuleCriteriaParser:
             nonlocal last_end, last_negative, additive
             prefix, suffix = match["prefix"], match["suffix"]
             name = ALIASES[match["name"]]
+            if name not in ("飯食", "麵食") and name not in PARENTS and                     cuisine_text[match.end():].lstrip().startswith(("飯", "麵", "便當", "丼")):
+                dish_words.append(match[0])  # e.g. 雞排飯 is a dish, not 炸物 + 飯食: leave it to the model.
+                return
             between = cuisine_text[last_end:match.start()].strip()
             inherited_negative = last_negative and bool(re.fullmatch(r"(?:和|及|、|或|跟|還有)+", between))
             if last_negative and not prefix and not suffix and not inherited_negative:
@@ -179,6 +189,7 @@ class RuleCriteriaParser:
             r"(?:請問|幫我|請|我|要|找|推薦|餐廳|吃什麼|有什麼|在|的|附近|這次|今天|可以嗎|謝謝|和|及|或|跟|還有|也|都|以|為主)|[\s,，。.!！?？、:：;；]",
             "", text,
         )
+        remainder = "".join(dish_words) + remainder
         unparsed = bool(remainder) or not changed
         if remainder:
             questions.append(f"尚無法理解「{remainder}」。目前支援預算、料理／排除偏好、午晚餐、斗六及指定地標，請換個說法。")

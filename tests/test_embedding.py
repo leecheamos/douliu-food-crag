@@ -217,11 +217,13 @@ class EmbedderAdapterTests(unittest.TestCase):
     def test_large_inputs_are_split_into_batches(self):
         settings = Settings(gemini_api_key="k", embedding_model="gemini-embedding-001")
         embedder = GeminiEmbedder(settings, dimensions=1)
-        replies = [self.response({"embeddings": [{"values": [1.0]}] * 100}),
-                   self.response({"embeddings": [{"values": [2.0]}] * 5})]
-        with patch("food_crag.adapters.gemini.urlopen", side_effect=replies) as send:
+        replies = [self.response({"embeddings": [{"values": [1.0]}] * 40}),
+                   self.response({"embeddings": [{"values": [1.0]}] * 40}),
+                   self.response({"embeddings": [{"values": [2.0]}] * 25})]
+        with patch("food_crag.adapters.gemini.urlopen", side_effect=replies) as send,                 patch("food_crag.adapters.gemini.time.sleep") as pause:
             vectors = embedder.embed(["x"] * 105)
-        self.assertEqual(send.call_count, 2)
+        self.assertEqual(send.call_count, 3)
+        self.assertEqual(pause.call_count, 2)  # Free-tier pause between batches only.
         self.assertEqual(len(vectors), 105)
 
     def test_unconfigured_invalid_or_malformed_fail_closed(self):
